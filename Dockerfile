@@ -1,46 +1,40 @@
 # --- Stage 1: Builder ---
 FROM ghcr.io/astral-sh/uv:latest AS uv_bin
-FROM python:3.11-slim-bookworm AS builder
+FROM python:3.13-slim-bookworm AS builder
 
-# Install uv from the official image
+# Install uv binary
 COPY --from=uv_bin /uv /uvx /bin/
 
 WORKDIR /app
 
-# Enable bytecode compilation
+# Ensure uv uses the system python (3.13) provided by the base image
+ENV UV_PYTHON_PREFERENCE=only-system
 ENV UV_COMPILE_BYTECODE=1
-# Prevent uv from looking for a project root outside /app
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 
-# Copy only dependency files first
+# Install dependencies only (leverage caching)
 COPY uv.lock pyproject.toml ./
-
-# Install dependencies
-# --frozen: ignores updates to lockfile
-# --no-install-project: skip installing the app itself in this step
 RUN uv sync --frozen --no-install-project --no-dev
 
-# --- Stage 2: Final ---
-FROM python:3.11-slim-bookworm
+# --- Stage 2: Final Runtime ---
+FROM python:3.13-slim-bookworm
 
 WORKDIR /app
 
-# Copy the virtual environment from builder
+# Copy the venv from builder
 COPY --from=builder /app/.venv /app/.venv
 
-# Copy your application code
+# Copy your code
 COPY . .
 
-# Set environment variables
-# 1. Add venv to PATH so 'streamlit' command is found
-# 2. Force python to look in the venv
+# Set environment paths
 ENV PATH="/app/.venv/bin:$PATH"
 ENV VIRTUAL_ENV=/app/.venv
 ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8501
 
-# Improved Healthcheck (doesn't require curl to be installed)
+# Healthcheck (standard Streamlit path)
 HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=3 \
     CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')" || exit 1
 
